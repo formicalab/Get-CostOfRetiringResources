@@ -1,4 +1,4 @@
-# v1.1.0
+# v1.1.1
 
 [CmdletBinding()]
 param(
@@ -42,7 +42,7 @@ if ($null -eq $resourceIds) {
 }
 
 # convert the retirement date to a datetime object
-$resourceIds = $resourceIds |% { $_.'Retirement Date' = ( $_.'Retirement Date' -as [datetime] ) ; $_ }
+$resourceIds = $resourceIds | % { $_.'Retirement Date' = ( $_.'Retirement Date' -as [datetime] ) ; $_ }
 
 # sort by retirement date (soonest first) then by retiring feature
 $resourceIds = $resourceIds | Sort-Object -Property @{Expression = "Retirement Date"; Ascending = $true }, @{Expression = "Retiring Feature"; Ascending = $true }
@@ -65,37 +65,49 @@ Write-Host -ForegroundColor Yellow $resourceIds.Count
 
 # if we have ASE in the list, we also need to get the list of all app plans in the ASE
 $aseResources = ($resourceIds | Where-Object { $_.'Type' -eq "microsoft.web/hostingenvironments" })
-if ($null -ne $aseResources)
-{
+if ($null -ne $aseResources) {
     Write-Host "You have $($aseResources.Count) ASE resource(s) in the list. Getting the impacted app service plans used by the ASEs..."
 
     $retiringFeature = $aseResources[0].'Retiring Feature'
     $retirementDate = $aseResources[0].'Retirement Date'
     $action = $aseResources[0].'Action'
     $aseResourcesIds = $aseResources.'Resource Name'
-    $appPlans = Get-AzAppServicePlan -ProgressAction Ignore | Where-Object HostingEnvironmentProfile -ne $null
-    $impactedAppPlans = $appPlans | Where-Object { $aseResourcesIds -contains $_.HostingEnvironmentProfile.Id }
 
-    Write-Host "There are $($impactedAppPlans.Count) impacted app plans."
+    $appPlans = Search-AzGraph -Query @"
+        resources
+        | where type =~ 'microsoft.web/serverfarms' and properties.hostingEnvironmentProfile <> ''
+        | mv-expand ASE = properties.hostingEnvironmentProfile
+        | project name, ASEid = ASE.id, type, subscriptionId, resourceGroup, location, id, tags
+        | where ASEid <> ''
+"@
 
-    # add the impacted app plans to the list of resources because we need to get the cost for them as well
-    foreach ($appPlan in $impactedAppPlans) {
-        $newresource = [PSCustomObject]@{
-            'Subscription' = $appPlan.Subscription
-            'Type' = $appPlan.Type
-            'Retiring Feature' = $retiringFeature
-            'Retirement Date' = $retirementDate
-            'Resource Group' = $appPlan.ResourceGroup
-            'Location' = $appPlan.Location
-            'Resource Name' = $appPlan.Id
-            'Tags' = $appPlan.Tags
-            'Action' = $action
+    #$appPlans = Get-AzAppServicePlan -ProgressAction Ignore | Where-Object HostingEnvironmentProfile -ne $null  # NOT USED, it gets app plans only from the current subscription
+    $impactedAppPlans = $appPlans | Where-Object { $aseResourcesIds -contains $_.ASEid }
+
+    if ($null -eq $impactedAppPlans) {
+        Write-Host "No impacted app plans found."
+    }
+    else {
+        Write-Host "There are $($impactedAppPlans.Count) impacted app plans."
+
+        # add the impacted app plans to the list of resources because we need to get the cost for them as well
+        foreach ($appPlan in $impactedAppPlans) {
+            $newresource = [PSCustomObject]@{
+                'Subscription'     = $appPlan.subscriptionId
+                'Type'             = $appPlan.type
+                'Retiring Feature' = $retiringFeature
+                'Retirement Date'  = $retirementDate
+                'Resource Group'   = $appPlan.resourceGroup
+                'Location'         = $appPlan.location
+                'Resource Name'    = $appPlan.id
+                'Tags'             = $appPlan.tags
+                'Action'           = $action
+            }
+            Write-Host  "Adding app plan $($appPlan.Name) to the list of resources to get cost for..."
+            $resourceIds += $newresource
         }
-        Write-Host  "Adding app plan $($appPlan.Name) to the list of resources to get cost for..."
-        $resourceIds += $newresource
     }
 }
-
 
 # get a token
 $token = (Get-AzAccessToken -ResourceUrl "https://management.azure.com/").Token
@@ -125,7 +137,7 @@ foreach ($resourceLine in $resourceIds) {
     write-host -NoNewLine "${resourceName}: "
 
     $uri = "https://management.azure.com/subscriptions/${subscriptionId}/resourceGroups/${resourceGroup}/providers/Microsoft.CostManagement/query?api-version=2023-11-01"
-
+    
     $jsonPayload = @{
         type       = "ActualCost"
         dataSet    = @{
