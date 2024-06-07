@@ -42,7 +42,7 @@ if (-not (Test-Path $ResourceIdFile)) {
     return
 }
 
-$resourceIds = Import-Csv -Path $ResourceIdFile -Delimiter ","
+$resourceIds = Import-Csv -Path $ResourceIdFile -Delimiter $delimiter
 if ($null -eq $resourceIds) {
     Write-Error "Failed to import CSV file or file is empty"
     return
