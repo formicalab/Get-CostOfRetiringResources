@@ -8,8 +8,6 @@ param(
     [string]$billingPeriod = $null,
     [Parameter(Mandatory = $false, HelpMessage = "End date with format: YYYY-MM-DD")]
     [datetime]$endDate = $null
-    [Parameter(Mandatory = $false, HelpMessage = "End date with format: YYYY-MM-DD")]
-    [datetime]$endDate = $null
 )
 
 #requires -version 7
@@ -17,9 +15,6 @@ Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
 $totalCost = 0
-$currentDate = Get-Date
-# prepare a hashtable to store cumulative costs for each resource type
-$totalCostByResourceType = @{}
 $currentDate = Get-Date
 # prepare a hashtable to store cumulative costs for each resource type
 $totalCostByResourceType = @{}
@@ -62,15 +57,9 @@ if ($null -eq $resourceIds -or $resourceIds.Count -eq 0) {
     return
 }
 
-if ($null -eq $resourceIds -or $resourceIds.Count -eq 0) {
-    Write-Error "No resources found in file with future retirement date on or before ${endDate}"
-    return
-}
-
 # filter out resources with a retirement date in the past
 $resourceIds = $resourceIds | Where-Object { $_.'Retirement Date' -ge ($currentDate.ToString("yyyy-MM-dd")) }
 
-Write-Host -NoNewline ([string]::IsNullOrEmpty($endDate) ? "Resources in file with future retirement date: " : "Resources in file with future retirement date on or before ${endDate}: ")
 Write-Host -NoNewline ([string]::IsNullOrEmpty($endDate) ? "Resources in file with future retirement date: " : "Resources in file with future retirement date on or before ${endDate}: ")
 Write-Host -ForegroundColor Yellow $resourceIds.Count
 
@@ -125,8 +114,6 @@ $token = (Get-AzAccessToken -ResourceUrl "https://management.azure.com/").Token
 
 # iterate over the resources in the list
 $line = 0
-Write-Host
-
 Write-Host
 
 foreach ($resourceLine in $resourceIds) {
@@ -214,20 +201,11 @@ foreach ($resourceLine in $resourceIds) {
     
     $totalCost += $cost
     $totalCostByResourceType["${resourceType}, ${retiringFeature}"] += $cost
-    $totalCostByResourceType["${resourceType}, ${retiringFeature}"] += $cost
 }
 
 write-host
 write-host -NoNewline "Total cost for all resources in billing period ${billingPeriod}: "
 write-host -ForegroundColor Yellow ("{0:N5}" -f $totalCost)
-
-# write out the costs by resource type
-write-host
-write-host "Total costs by resource type:"
-foreach ($resourceTypeAndRetiringFeature in $totalCostByResourceType.Keys) {
-    write-host -NoNewline "${resourceTypeAndRetiringFeature}: "
-    write-host -ForegroundColor Yellow ("{0:N5}" -f $totalCostByResourceType[$resourceTypeAndRetiringFeature])
-}
 
 # write out the costs by resource type
 write-host
