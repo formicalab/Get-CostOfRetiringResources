@@ -6,7 +6,7 @@ param(
     [string]$ResourceIdFile = $null,
     [Parameter(Mandatory = $true, HelpMessage = "Billing period, example: 202404")]
     [string]$billingPeriod = $null,
-    [Parameter(Mandatory = $false, HelpMessage = "End date in yyyy-MM-dd")]
+    [Parameter(Mandatory = $false, HelpMessage = "End date with format: YYYY-MM-DD")]
     [datetime]$endDate = $null
 )
 
@@ -62,13 +62,48 @@ $resourceIds = $resourceIds | Where-Object { $_.'Retirement Date' -ge ($currentD
 
 Write-Host -NoNewline ([string]::IsNullOrEmpty($endDate) ? "Resources in file with future retirement date: " : "Resources in file with future retirement date on or before ${endDate}: ")
 Write-Host -ForegroundColor Yellow $resourceIds.Count
-Write-Host
+
+# if we have ASE in the list, we also need to get the list of all app plans in the ASE
+$aseResources = ($resourceIds | Where-Object { $_.'Type' -eq "microsoft.web/hostingenvironments" })
+if ($null -ne $aseResources)
+{
+    Write-Host "You have $($aseResources.Count) ASE resource(s) in the list. Getting the impacted app service plans used by the ASEs..."
+
+    $retiringFeature = $aseResources[0].'Retiring Feature'
+    $retirementDate = $aseResources[0].'Retirement Date'
+    $action = $aseResources[0].'Action'
+    $aseResourcesIds = $aseResources.'Resource Name'
+    $appPlans = Get-AzAppServicePlan -ProgressAction Ignore | Where-Object HostingEnvironmentProfile -ne $null
+    $impactedAppPlans = $appPlans | Where-Object { $aseResourcesIds -contains $_.HostingEnvironmentProfile.Id }
+
+    Write-Host "There are $($impactedAppPlans.Count) impacted app plans."
+
+    # add the impacted app plans to the list of resources because we need to get the cost for them as well
+    foreach ($appPlan in $impactedAppPlans) {
+        $newresource = [PSCustomObject]@{
+            'Subscription' = $appPlan.Subscription
+            'Type' = $appPlan.Type
+            'Retiring Feature' = $retiringFeature
+            'Retirement Date' = $retirementDate
+            'Resource Group' = $appPlan.ResourceGroup
+            'Location' = $appPlan.Location
+            'Resource Name' = $appPlan.Id
+            'Tags' = $appPlan.Tags
+            'Action' = $action
+        }
+        Write-Host  "Adding app plan $($appPlan.Name) to the list of resources to get cost for..."
+        $resourceIds += $newresource
+    }
+}
+
 
 # get a token
 $token = (Get-AzAccessToken -ResourceUrl "https://management.azure.com/").Token
 
 # iterate over the resources in the list
 $line = 0
+Write-Host
+
 foreach ($resourceLine in $resourceIds) {
 
     $line++
