@@ -13,6 +13,9 @@ Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
 $totalCost = 0
+$currentDate = Get-Date
+# prepare a hashtable to store cumulative costs for each resource type
+$totalCostByResourceType = @{}
 
 # Validate billing period
 if ($billingPeriod -notmatch '^\d{6}$') {
@@ -49,12 +52,16 @@ $resourceIds = $resourceIds | Sort-Object -Property @{Expression = "Retirement D
 
 # if an end date is specified, filter out resources with a retirement date after the end date
 if (-not [string]::IsNullOrEmpty($endDate)) {
-    $resourceIds = $resourceIds | Where-Object { $_.'Retirement Date' -le $endDate }
+    $resourceIds = $resourceIds | Where-Object { [datetime]::Parse($_.'Retirement Date') -le $endDate }
+}
+
+if ($null -eq $resourceIds -or $resourceIds.Count -eq 0) {
+    Write-Error "No resources found in file with future retirement date on or before ${endDate}"
+    return
 }
 
 # filter out resources with a retirement date in the past
-$currentDate = Get-Date
-$resourceIds = $resourceIds | Where-Object { $_.'Retirement Date' -ge ($currentDate.ToString("yyyy-MM-dd")) }
+$resourceIds = $resourceIds | Where-Object { [datetime]::Parse($_.'Retirement Date') -ge ($currentDate.ToString("yyyy-MM-dd")) }
 
 Write-Host -NoNewline ([string]::IsNullOrEmpty($endDate) ? "All resources in file with future retirement date: " : "Resources in file with future retirement date on or before ${endDate}: ")
 Write-Host -ForegroundColor Yellow $resourceIds.Count
@@ -63,8 +70,6 @@ Write-Host -ForegroundColor Yellow $resourceIds.Count
 $token = (Get-AzAccessToken -ResourceUrl "https://management.azure.com/").Token
 
 # iterate over the resources in the list
-$totalCost = 0
-$currentDate = Get-Date
 $line = 0
 foreach ($resourceLine in $resourceIds) {
 
@@ -150,8 +155,17 @@ foreach ($resourceLine in $resourceIds) {
     } while (-not $done)
     
     $totalCost += $cost
+    $totalCostByResourceType["${resourceType}, ${retiringFeature}"] += $cost
 }
 
 write-host
 write-host -NoNewline "Total cost for all resources in billing period ${billingPeriod}: "
 write-host -ForegroundColor Yellow ("{0:N5}" -f $totalCost)
+
+# write out the costs by resource type
+write-host
+write-host "Total costs by resource type:"
+foreach ($resourceTypeAndRetiringFeature in $totalCostByResourceType.Keys) {
+    write-host -NoNewline "${resourceTypeAndRetiringFeature}: "
+    write-host -ForegroundColor Yellow ("{0:N5}" -f $totalCostByResourceType[$resourceTypeAndRetiringFeature])
+}
