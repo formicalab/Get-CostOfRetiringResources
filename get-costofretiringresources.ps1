@@ -1,3 +1,5 @@
+# v1.1.0
+
 [CmdletBinding()]
 param(
     [Parameter(Mandatory = $false, HelpMessage = "Specify the Service Retirement CSV File")]
@@ -5,7 +7,7 @@ param(
     [Parameter(Mandatory = $true, HelpMessage = "Billing period, example: 202404")]
     [string]$billingPeriod = $null,
     [Parameter(Mandatory = $false, HelpMessage = "End date in yyyy-MM-dd")]
-    [string]$endDate = $null
+    [datetime]$endDate = $null
 )
 
 #requires -version 7
@@ -27,14 +29,6 @@ if ($billingPeriod -notmatch '^\d{6}$') {
 $billingPeriodStart = [datetime]::ParseExact($billingPeriod, "yyyyMM", $null).ToString("yyyy-MM-01T00:00:00+00:00")
 $billingPeriodEnd = [datetime]::ParseExact($billingPeriod, "yyyyMM", $null).AddMonths(1).AddSeconds(-1).ToString("yyyy-MM-ddT23:59:59+00:00")
 
-# validate end date if specified
-if (-not [string]::IsNullOrEmpty($endDate)) {
-    if ($endDate -notmatch '^\d{4}-\d{2}-\d{2}$') {
-        Write-Error "Invalid end date format '$endDate'. Expected format: yyyy-MM-dd"
-        return
-    }
-}
-
 # Validate and import CSV file
 if (-not (Test-Path $ResourceIdFile)) {
     Write-Error "File $ResourceIdFile does not exist"
@@ -47,12 +41,15 @@ if ($null -eq $resourceIds) {
     return
 }
 
+# convert the retirement date to a datetime object
+$resourceIds = $resourceIds |% { $_.'Retirement Date' = ( $_.'Retirement Date' -as [datetime] ) ; $_ }
+
 # sort by retirement date (soonest first) then by retiring feature
 $resourceIds = $resourceIds | Sort-Object -Property @{Expression = "Retirement Date"; Ascending = $true }, @{Expression = "Retiring Feature"; Ascending = $true }
 
 # if an end date is specified, filter out resources with a retirement date after the end date
 if (-not [string]::IsNullOrEmpty($endDate)) {
-    $resourceIds = $resourceIds | Where-Object { [datetime]::Parse($_.'Retirement Date') -le $endDate }
+    $resourceIds = $resourceIds | Where-Object { $_.'Retirement Date' -le $endDate }
 }
 
 if ($null -eq $resourceIds -or $resourceIds.Count -eq 0) {
@@ -61,10 +58,11 @@ if ($null -eq $resourceIds -or $resourceIds.Count -eq 0) {
 }
 
 # filter out resources with a retirement date in the past
-$resourceIds = $resourceIds | Where-Object { [datetime]::Parse($_.'Retirement Date') -ge ($currentDate.ToString("yyyy-MM-dd")) }
+$resourceIds = $resourceIds | Where-Object { $_.'Retirement Date' -ge ($currentDate.ToString("yyyy-MM-dd")) }
 
-Write-Host -NoNewline ([string]::IsNullOrEmpty($endDate) ? "All resources in file with future retirement date: " : "Resources in file with future retirement date on or before ${endDate}: ")
+Write-Host -NoNewline ([string]::IsNullOrEmpty($endDate) ? "Resources in file with future retirement date: " : "Resources in file with future retirement date on or before ${endDate}: ")
 Write-Host -ForegroundColor Yellow $resourceIds.Count
+Write-Host
 
 # get a token
 $token = (Get-AzAccessToken -ResourceUrl "https://management.azure.com/").Token
