@@ -1,11 +1,15 @@
 [CmdletBinding()]
 param(
-    [Parameter(Mandatory = $false, HelpMessage = "Specify the Service Retirement CSV File")]
+    [Parameter(Mandatory = $true, HelpMessage = "Specify the Service Retirement CSV File")]
     [string]$ResourceIdFile = $null,
     [Parameter(Mandatory = $true, HelpMessage = "Billing period, example: 202404")]
     [string]$billingPeriod = $null,
     [Parameter(Mandatory = $false, HelpMessage = "End date in yyyy-MM-dd")]
-    [string]$endDate = $null
+    [string]$endDate = $null,
+    [Parameter(Mandatory = $false, HelpMessage = "CSV delimiter, default is semicolon")]
+    [string]$delimiter = ";",
+    [Parameter(Mandatory = $false, HelpMessage = "Export output to a file, default is console output")]
+    [string]$output = $null
 )
 
 #requires -version 7
@@ -38,7 +42,7 @@ if (-not (Test-Path $ResourceIdFile)) {
     return
 }
 
-$resourceIds = Import-Csv -Path $ResourceIdFile -Delimiter ";"
+$resourceIds = Import-Csv -Path $ResourceIdFile -Delimiter ","
 if ($null -eq $resourceIds) {
     Write-Error "Failed to import CSV file or file is empty"
     return
@@ -66,9 +70,12 @@ $token = (Get-AzAccessToken -ResourceUrl "https://management.azure.com/").Token
 $totalCost = 0
 $currentDate = Get-Date
 $line = 0
+$export = @()
+$currency = $null
 foreach ($resourceLine in $resourceIds) {
 
     $line++
+    $row = $null
 
     $resourceId = $resourceLine.'Resource Name'
     $subscriptionId = $resourceId.Split("/")[2]
@@ -85,6 +92,19 @@ foreach ($resourceLine in $resourceIds) {
     write-host -NoNewline "${resourceType}, "
     write-host -NoNewline -ForegroundColor Yellow "${retiringFeature}: "
     write-host -NoNewLine "${resourceName}: "
+
+    if ($output -ne $null) {
+        $row = [PSCustomObject]@{
+            'Resource Name' = $resourceName
+            'Resource Type' = $resourceType
+            'Subscription ID' = $subscriptionId
+            'Resource Group' = $resourceGroup
+            'Retirement Date' = $retirementDate
+            'Retiring Feature' = $retiringFeature
+            'Cost' = 0
+            'Currency' = $null
+        }
+    }
 
     $uri = "https://management.azure.com/subscriptions/${subscriptionId}/resourceGroups/${resourceGroup}/providers/Microsoft.CostManagement/query?api-version=2023-11-01"
 
@@ -140,7 +160,12 @@ foreach ($resourceLine in $resourceIds) {
         else {
             if (($null -ne $response.properties.rows) -and ($response.properties.rows.Count -gt 0)) {
                 $cost = $response.properties.rows[0][0]
-                write-host -ForegroundColor Yellow ("{0:N5}" -f $cost)            
+                $currency = $response.properties.rows[0][2]
+                write-host -ForegroundColor Yellow ("{0:N5} {1}" -f $cost, $currency)   
+                if ($output -ne $null) {
+                    $row.'Cost' = $cost
+                    $row.'Currency' = $currency
+                }         
             }
             else {
                 write-host -ForegroundColor Green "no data"
@@ -150,8 +175,17 @@ foreach ($resourceLine in $resourceIds) {
     } while (-not $done)
     
     $totalCost += $cost
+    if ($output -ne $null) {
+        $export += $row
+    } 
 }
 
 write-host
 write-host -NoNewline "Total cost for all resources in billing period ${billingPeriod}: "
-write-host -ForegroundColor Yellow ("{0:N5}" -f $totalCost)
+write-host -ForegroundColor Yellow ("{0:N5} {1}" -f $totalCost, $currency)
+
+if ($output -ne $null) {
+    $export | Export-Csv -Path $output -Delimiter $delimiter -NoTypeInformation
+    write-host
+    write-host "Exported to $output"
+}
