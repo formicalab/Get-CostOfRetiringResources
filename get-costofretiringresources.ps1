@@ -74,13 +74,27 @@ function Get-ResourceCost($resourceId, $billingPeriodStart, $billingPeriodEnd, $
     do {
         $requestCompleted = $false
         $statusCode = 0
-        $response = Invoke-RestMethod -Uri $uri -Method Post -SkipHttpErrorCheck -StatusCodeVariable "statusCode" -Body $jsonPayload -Headers @{
+        $responseHeaders = $null
+        $response = Invoke-RestMethod -Uri $uri -Method Post -SkipHttpErrorCheck -StatusCodeVariable "statusCode" -ResponseHeadersVariable "responseHeaders" -Body $jsonPayload -Headers @{
             'Authorization' = "Bearer $token"
             'Content-Type'  = 'application/json'
         }
+        #             "Client-Type"   = "Get-CostOfRetiringResources.ps1"
+
         if ($statusCode -eq 429) {
-            write-host -ForegroundColor DarkYellow "wait... " -NoNewline
-            Start-Sleep -Seconds 30
+            $qpuRetryAfter = [double]::Parse($responseHeaders['x-ms-ratelimit-microsoft.costmanagement-client-qpu-retry-after'] ?? 0)
+            $clientRetryAfter = [double]::Parse($responseHeaders['x-ms-ratelimit-microsoft.costmanagement-client-retry-after'] ?? 0)
+            $tenantRetryAfter = [double]::Parse($responseHeaders['x-ms-ratelimit-microsoft.costmanagement-tenant-retry-after'] ?? 0)
+            $entityRetryAfter = [double]::Parse($responseHeaders['x-ms-ratelimit-microsoft.costmanagement-entity-retry-after'] ?? 0)
+            
+            $retryAfterSet = @($qpuRetryAfter, $clientRetryAfter, $tenantRetryAfter, $entityRetryAfter)
+            $retryAfter = $retryAfterSet | Sort-Object -Descending | Select-Object -First 1
+            if ($retryAfter -eq 0) {
+                $retryAfter = 30    # if none of the above is set, assume a delay of 30 seconds. Otherwise use the maximum of the values
+            }
+
+            write-host -ForegroundColor DarkYellow "wait (${retryAfter})... " -NoNewline
+            Start-Sleep -Seconds $retryAfter
         }
         elseif ($statusCode -ne 200) {
             Write-host -ForegroundColor Red "Error: $statusCode"
