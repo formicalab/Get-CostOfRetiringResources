@@ -1,4 +1,4 @@
-# v1.1.1
+# v1.1.2
 
 [CmdletBinding()]
 param(
@@ -72,7 +72,7 @@ function Get-ResourceCost($resourceId, $billingPeriodStart, $billingPeriodEnd, $
 
     # send the request. Handle errors 429 (too many requests) by waiting 30 seconds and retrying
     do {
-        $done = $false
+        $requestCompleted = $false
         $statusCode = 0
         $response = Invoke-RestMethod -Uri $uri -Method Post -SkipHttpErrorCheck -StatusCodeVariable "statusCode" -Body $jsonPayload -Headers @{
             'Authorization' = "Bearer $token"
@@ -84,7 +84,7 @@ function Get-ResourceCost($resourceId, $billingPeriodStart, $billingPeriodEnd, $
         }
         elseif ($statusCode -ne 200) {
             Write-host -ForegroundColor Red "Error: $statusCode"
-            $done = $true
+            $requestCompleted = $true
         }
         else {
             if (($null -ne $response.properties.rows) -and ($response.properties.rows.Count -gt 0)) {
@@ -94,19 +94,16 @@ function Get-ResourceCost($resourceId, $billingPeriodStart, $billingPeriodEnd, $
             else {
                 write-host -ForegroundColor Green "no data"
             }
-            $done = $true
+            $requestCompleted = $true
         }
-    } while (-not $done)
+    } while (-not $requestCompleted)
 
     return $cost
 }
 
 ### main script ###
 
-$totalCost = 0
 $currentDate = Get-Date
-# prepare a hashtable to store cumulative costs for each resource type
-$totalCostByResourceType = @{}
 
 # Validate billing period
 if ($billingPeriod -notmatch '^\d{6}$') {
@@ -167,7 +164,6 @@ if ($null -ne $aseResources) {
         | where ASEid <> ''
 "@
 
-    #$appPlans = Get-AzAppServicePlan -ProgressAction Ignore | Where-Object HostingEnvironmentProfile -ne $null  # NOT USED, it gets app plans only from the current subscription
     $impactedAppPlans = $appPlans | Where-Object { $aseResourcesIds -contains $_.ASEid }
 
     if ($null -eq $impactedAppPlans) {
@@ -201,13 +197,16 @@ $token = (Get-AzAccessToken -ResourceUrl "https://management.azure.com/").Token
 # sort by retirement date (soonest first) then by retiring feature
 $resourceIds = $resourceIds | Sort-Object -Property @{Expression = "Retirement Date"; Ascending = $true }, @{Expression = "Retiring Feature"; Ascending = $true }
 
-# iterate over the resources in the list
-$line = 0
-Write-Host
+$resourceCount = 0
+$totalCost = 0
+# prepare a hashtable to store cumulative costs for each resource type
+$totalCostByResourceType = @{}
 
+# iterate over the resources in the list
+Write-Host
 foreach ($resourceLine in $resourceIds) {
 
-    $line++
+    $resourceCount++
 
     $resourceId = $resourceLine.'Resource Name'
     $resourceType = $resourceLine.'Type'
@@ -216,13 +215,13 @@ foreach ($resourceLine in $resourceIds) {
     $retirementDate = $resourceLine.'Retirement Date'
     $retiringFeature = $resourceLine.'Retiring Feature'
 
-    # get the cost for the resource in the billing period
-    write-host -NoNewline "[${line}] "
+    write-host -NoNewline "[${resourceCount}] "
     write-host -NoNewline -ForegroundColor Cyan "${retirementDate} "
     write-host -NoNewline "${resourceType}, "
     write-host -NoNewline -ForegroundColor Yellow "${retiringFeature}: "
     write-host -NoNewLine "${resourceName}: "
 
+    # get the cost for the resource in the billing period
     $cost = Get-ResourceCost -resourceId $resourceId -billingPeriodStart $billingPeriodStart -billingPeriodEnd $billingPeriodEnd -token $token
 
     $totalCost += $cost
