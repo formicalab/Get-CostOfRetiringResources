@@ -78,8 +78,8 @@ function Get-ResourceCost($resourceId, $billingPeriodStart, $billingPeriodEnd, $
         $response = Invoke-RestMethod -Uri $uri -Method Post -SkipHttpErrorCheck -StatusCodeVariable "statusCode" -ResponseHeadersVariable "responseHeaders" -Body $jsonPayload -Headers @{
             'Authorization' = "Bearer $token"
             'Content-Type'  = 'application/json'
+            "Client-Type"   = "GetCostOfRetiringResources"
         }
-        #             "Client-Type"   = "Get-CostOfRetiringResources.ps1"
 
         if ($statusCode -eq 429) {
             $qpuRetryAfter = [double]::Parse($responseHeaders['x-ms-ratelimit-microsoft.costmanagement-client-qpu-retry-after'] ?? 0)
@@ -93,7 +93,7 @@ function Get-ResourceCost($resourceId, $billingPeriodStart, $billingPeriodEnd, $
                 $retryAfter = 30    # if none of the above is set, assume a delay of 30 seconds. Otherwise use the maximum of the values
             }
 
-            write-host -ForegroundColor DarkYellow "wait (${retryAfter})... " -NoNewline
+            write-host -ForegroundColor DarkYellow "wait ${retryAfter}s... " -NoNewline
             Start-Sleep -Seconds $retryAfter
         }
         elseif ($statusCode -ne 200) {
