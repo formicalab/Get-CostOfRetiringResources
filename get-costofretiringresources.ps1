@@ -70,7 +70,7 @@ function Get-ResourceCost($resourceId, $billingPeriodStart, $billingPeriodEnd, $
 
     $cost = 0
 
-    # send the request. Handle errors 429 (too many requests) by waiting 30 seconds and retrying
+    # send the request. Handle errors 429 (too many requests)
     do {
         $requestCompleted = $false
         $statusCode = 0
@@ -85,12 +85,11 @@ function Get-ResourceCost($resourceId, $billingPeriodStart, $billingPeriodEnd, $
             $qpuRetryAfter = [double]::Parse($responseHeaders['x-ms-ratelimit-microsoft.costmanagement-client-qpu-retry-after'] ?? 0)
             $clientRetryAfter = [double]::Parse($responseHeaders['x-ms-ratelimit-microsoft.costmanagement-client-retry-after'] ?? 0)
             $tenantRetryAfter = [double]::Parse($responseHeaders['x-ms-ratelimit-microsoft.costmanagement-tenant-retry-after'] ?? 0)
-            $entityRetryAfter = [double]::Parse($responseHeaders['x-ms-ratelimit-microsoft.costmanagement-entity-retry-after'] ?? 0)
-            
+            $entityRetryAfter = [double]::Parse($responseHeaders['x-ms-ratelimit-microsoft.costmanagement-entity-retry-after'] ?? 0)            
             $retryAfterSet = @($qpuRetryAfter, $clientRetryAfter, $tenantRetryAfter, $entityRetryAfter)
-            $retryAfter = $retryAfterSet | Sort-Object -Descending | Select-Object -First 1
+            $retryAfter = $retryAfterSet | Sort-Object -Descending | Select-Object -First 1 # get the maximum value of the retry-after values
             if ($retryAfter -eq 0) {
-                $retryAfter = 30    # if none of the above is set, assume a delay of 30 seconds. Otherwise use the maximum of the values
+                $retryAfter = 30    # if none of the above is set, assume a delay of 30 seconds
             }
 
             write-host -ForegroundColor DarkYellow "wait ${retryAfter}s... " -NoNewline
