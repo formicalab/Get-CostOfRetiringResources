@@ -1,4 +1,4 @@
-# v1.1.2
+# v1.1.3
 
 [CmdletBinding()]
 param(
@@ -34,6 +34,7 @@ function Get-ResourceCost($resourceId, $billingPeriodStart, $billingPeriodEnd, $
 
     $subscriptionId = $resourceId.Split("/")[2]
     $resourceGroup = $resourceId.Split("/")[4]
+    
 
     $uri = "https://management.azure.com/subscriptions/${subscriptionId}/resourceGroups/${resourceGroup}/providers/Microsoft.CostManagement/query?api-version=2023-11-01"
 
@@ -227,13 +228,16 @@ foreach ($resourceLine in $resourceIds) {
     $resourceName = $resourceid.Split("/")[8..($resourceid.Split("/").Count - 1)] -join "/"
     $retirementDate = $resourceLine.'Retirement Date'
     $retiringFeature = $resourceLine.'Retiring Feature'
+    $subscriptionId = $resourceId.Split("/")[2]
+    $subscriptionName = $(Get-Azsubscription -SubscriptionId $subscriptionId).Name
 
     write-host -NoNewline "[${resourceCount}] "
     write-host -NoNewline -ForegroundColor Cyan "${retirementDate} "
+    write-host -NoNewLine "${subscriptionName}: "
     write-host -NoNewline "${resourceType}, "
     write-host -NoNewline -ForegroundColor Yellow "${retiringFeature}: "
     write-host -NoNewLine "${resourceName}: "
-
+    
     # get the cost for the resource in the billing period
     $cost = Get-ResourceCost -resourceId $resourceId -billingPeriodStart $billingPeriodStart -billingPeriodEnd $billingPeriodEnd -token $token
 
