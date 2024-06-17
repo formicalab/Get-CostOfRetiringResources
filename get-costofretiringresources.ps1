@@ -34,6 +34,7 @@ function Get-ResourceCost($resourceId, $billingPeriodStart, $billingPeriodEnd, $
 
     $subscriptionId = $resourceId.Split("/")[2]
     $resourceGroup = $resourceId.Split("/")[4]
+    $subscriptionName = $(Get-Azsubscription -SubscriptionId $subscriptionId).Name
 
     $uri = "https://management.azure.com/subscriptions/${subscriptionId}/resourceGroups/${resourceGroup}/providers/Microsoft.CostManagement/query?api-version=2023-11-01"
 
@@ -189,6 +190,7 @@ if ($null -ne $aseResources) {
         foreach ($appPlan in $impactedAppPlans) {
             $newresource = [PSCustomObject]@{
                 'Subscription'     = $appPlan.subscriptionId
+                'SubscriptionName' = $subscriptionName
                 'Type'             = $appPlan.type
                 'Retiring Feature' = $retiringFeature
                 'Retirement Date'  = $retirementDate
