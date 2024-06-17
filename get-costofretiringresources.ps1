@@ -233,11 +233,11 @@ foreach ($resourceLine in $resourceIds) {
 
     write-host -NoNewline "[${resourceCount}] "
     write-host -NoNewline -ForegroundColor Cyan "${retirementDate} "
+    write-host -NoNewLine "${subscriptionName}: "
     write-host -NoNewline "${resourceType}, "
     write-host -NoNewline -ForegroundColor Yellow "${retiringFeature}: "
     write-host -NoNewLine "${resourceName}: "
-    write-host -NoNewLine "${subscriptionName}: "
-
+    
     # get the cost for the resource in the billing period
     $cost = Get-ResourceCost -resourceId $resourceId -billingPeriodStart $billingPeriodStart -billingPeriodEnd $billingPeriodEnd -token $token
 
