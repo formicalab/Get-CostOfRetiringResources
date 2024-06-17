@@ -190,7 +190,6 @@ if ($null -ne $aseResources) {
         foreach ($appPlan in $impactedAppPlans) {
             $newresource = [PSCustomObject]@{
                 'Subscription'     = $appPlan.subscriptionId
-                'SubscriptionName' = $subscriptionName
                 'Type'             = $appPlan.type
                 'Retiring Feature' = $retiringFeature
                 'Retirement Date'  = $retirementDate
