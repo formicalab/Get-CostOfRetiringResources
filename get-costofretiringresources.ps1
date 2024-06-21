@@ -1,4 +1,4 @@
-# v1.1.3
+# v1.1.4
 
 [CmdletBinding()]
 param(
@@ -7,7 +7,11 @@ param(
     [Parameter(Mandatory = $true, HelpMessage = "Billing period, example: 202404")]
     [string]$billingPeriod = $null,
     [Parameter(Mandatory = $false, HelpMessage = "End date with format: YYYY-MM-DD")]
-    [datetime]$endDate = [datetime]::MaxValue
+    [datetime]$endDate = [datetime]::MaxValue,
+    [Parameter(Mandatory = $false, HelpMessage = "CSV delimiter, default is semicolon")]
+    [string]$delimiter = ";",
+    [Parameter(Mandatory = $false, HelpMessage = "Export output to a file, default is console output")]
+    [string]$output = $null
 )
 
 #requires -version 7
@@ -32,7 +36,27 @@ The token to use for authentication
 #>
 function Get-ResourceCost($resourceId, $billingPeriodStart, $billingPeriodEnd, $token) {
 
+<#
+.SYNOPSIS
+Get the cost of retiring resources in a billing period
+
+.PARAMETER resourceId
+The resource ID of the resource to get the cost for
+
+.PARAMETER billingPeriodStart
+The start of the billing period in UTC format
+
+.PARAMETER billingPeriodEnd
+The end of the billing period in UTC format
+
+.PARAMETER token
+The token to use for authentication
+#>
+function Get-ResourceCost($resourceId, $billingPeriodStart, $billingPeriodEnd, $token) {
+
     $subscriptionId = $resourceId.Split("/")[2]
+    $resourceGroup = $resourceId.Split("/")[4]
+    
     $resourceGroup = $resourceId.Split("/")[4]
     
 
@@ -67,22 +91,42 @@ function Get-ResourceCost($resourceId, $billingPeriodStart, $billingPeriodEnd, $
         }
     }
 
+
     $jsonPayload = $jsonPayload | ConvertTo-Json -Depth 10
+
 
     $cost = 0
 
     # send the request. Handle errors 429 (too many requests)
+    # send the request. Handle errors 429 (too many requests)
     do {
         $requestCompleted = $false
+        $requestCompleted = $false
         $statusCode = 0
+        $responseHeaders = $null
+        $response = Invoke-RestMethod -Uri $uri -Method Post -SkipHttpErrorCheck -StatusCodeVariable "statusCode" -ResponseHeadersVariable "responseHeaders" -Body $jsonPayload -Headers @{
         $responseHeaders = $null
         $response = Invoke-RestMethod -Uri $uri -Method Post -SkipHttpErrorCheck -StatusCodeVariable "statusCode" -ResponseHeadersVariable "responseHeaders" -Body $jsonPayload -Headers @{
             'Authorization' = "Bearer $token"
             'Content-Type'  = 'application/json'
             "Client-Type"   = "GetCostOfRetiringResources"
+            "Client-Type"   = "GetCostOfRetiringResources"
         }
 
+
         if ($statusCode -eq 429) {
+            $qpuRetryAfter = [double]::Parse($responseHeaders['x-ms-ratelimit-microsoft.costmanagement-client-qpu-retry-after'] ?? 0)
+            $clientRetryAfter = [double]::Parse($responseHeaders['x-ms-ratelimit-microsoft.costmanagement-client-retry-after'] ?? 0)
+            $tenantRetryAfter = [double]::Parse($responseHeaders['x-ms-ratelimit-microsoft.costmanagement-tenant-retry-after'] ?? 0)
+            $entityRetryAfter = [double]::Parse($responseHeaders['x-ms-ratelimit-microsoft.costmanagement-entity-retry-after'] ?? 0)            
+            $retryAfterSet = @($qpuRetryAfter, $clientRetryAfter, $tenantRetryAfter, $entityRetryAfter)
+            $retryAfter = $retryAfterSet | Sort-Object -Descending | Select-Object -First 1 # get the maximum value of the retry-after values
+            if ($retryAfter -eq 0) {
+                $retryAfter = 30    # if none of the above is set, assume a delay of 30 seconds
+            }
+
+            write-host -ForegroundColor DarkYellow "wait ${retryAfter}s... " -NoNewline
+            Start-Sleep -Seconds $retryAfter
             $qpuRetryAfter = [double]::Parse($responseHeaders['x-ms-ratelimit-microsoft.costmanagement-client-qpu-retry-after'] ?? 0)
             $clientRetryAfter = [double]::Parse($responseHeaders['x-ms-ratelimit-microsoft.costmanagement-client-retry-after'] ?? 0)
             $tenantRetryAfter = [double]::Parse($responseHeaders['x-ms-ratelimit-microsoft.costmanagement-tenant-retry-after'] ?? 0)
@@ -99,10 +143,12 @@ function Get-ResourceCost($resourceId, $billingPeriodStart, $billingPeriodEnd, $
         elseif ($statusCode -ne 200) {
             Write-host -ForegroundColor Red "Error: $statusCode"
             $requestCompleted = $true
+            $requestCompleted = $true
         }
         else {
             if (($null -ne $response.properties.rows) -and ($response.properties.rows.Count -gt 0)) {
                 $cost = $response.properties.rows[0][0]
+                write-host -ForegroundColor Yellow ("{0:N5}" -f $cost)
                 write-host -ForegroundColor Yellow ("{0:N5}" -f $cost)
             }
             else {
@@ -135,7 +181,7 @@ if (-not (Test-Path $ResourceIdFile)) {
     return
 }
 
-$resourceIds = Import-Csv -Path $ResourceIdFile -Delimiter ";"
+$resourceIds = Import-Csv -Path $ResourceIdFile -Delimiter $delimiter
 if ($null -eq $resourceIds) {
     Write-Error "Failed to import CSV file or file is empty"
     return
@@ -207,12 +253,15 @@ if ($null -ne $aseResources) {
 
 # get a token
 $token = (Get-AzAccessToken -ResourceUrl "https://management.azure.com/").Token
+$tenantId = (Get-AzContext).Tenant.Id
 
 # sort by retirement date (soonest first) then by retiring feature
 $resourceIds = $resourceIds | Sort-Object -Property @{Expression = "Retirement Date"; Ascending = $true }, @{Expression = "Retiring Feature"; Ascending = $true }
 
 $resourceCount = 0
 $totalCost = 0
+$export = @()
+$subscriptions = @{}
 # prepare a hashtable to store cumulative costs for each resource type
 $totalCostByResourceType = @{}
 
@@ -226,10 +275,14 @@ foreach ($resourceLine in $resourceIds) {
     $resourceType = $resourceLine.'Type'
     # extract the resource name from the resource ID - it's the last part of the resource ID from item #7 onwards. It can have one or more slashes in it.
     $resourceName = $resourceid.Split("/")[8..($resourceid.Split("/").Count - 1)] -join "/"
+    $resourceGroup = $resourceid.Split("/")[4]
     $retirementDate = $resourceLine.'Retirement Date'
     $retiringFeature = $resourceLine.'Retiring Feature'
     $subscriptionId = $resourceId.Split("/")[2]
-    $subscriptionName = $(Get-Azsubscription -SubscriptionId $subscriptionId).Name
+    if ($subscriptions[$subscriptionId] -eq $null) {
+        $subscriptions[$subscriptionId] = (Get-Azsubscription -SubscriptionId $subscriptionId -TenantId $tenantId -WarningAction SilentlyContinue).Name
+    }
+    $subscriptionName = $subscriptions[$subscriptionId]
 
     write-host -NoNewline "[${resourceCount}] "
     write-host -NoNewline -ForegroundColor Cyan "${retirementDate} "
@@ -237,11 +290,29 @@ foreach ($resourceLine in $resourceIds) {
     write-host -NoNewline "${resourceType}, "
     write-host -NoNewline -ForegroundColor Yellow "${retiringFeature}: "
     write-host -NoNewLine "${resourceName}: "
-    
+
     # get the cost for the resource in the billing period
     $cost = Get-ResourceCost -resourceId $resourceId -billingPeriodStart $billingPeriodStart -billingPeriodEnd $billingPeriodEnd -token $token
 
+    if ($output -ne $null) {
+        $row = [PSCustomObject]@{
+            'Resource Name' = $resourceName
+            'Resource Type' = $resourceType
+            'Subscription ID' = $subscriptionId
+            'Subscription Name' = $subscriptionName
+            'Resource Group' = $resourceGroup
+            'Retirement Date' = $retirementDate
+            'Retiring Feature' = $retiringFeature
+            'Cost' = $cost
+        }
+
+        $export += $row
+    }
+
+
+    
     $totalCost += $cost
+    $totalCostByResourceType["${resourceType}, ${retiringFeature}"] += $cost
     $totalCostByResourceType["${resourceType}, ${retiringFeature}"] += $cost
 }
 
@@ -255,4 +326,10 @@ write-host "Total costs by resource type:"
 foreach ($resourceTypeAndRetiringFeature in $totalCostByResourceType.Keys) {
     write-host -NoNewline "${resourceTypeAndRetiringFeature}: "
     write-host -ForegroundColor Yellow ("{0:N5}" -f $totalCostByResourceType[$resourceTypeAndRetiringFeature])
+}
+
+if ($export -ne $null) {
+    $export | Export-Csv -Path $output -Delimiter $delimiter -NoTypeInformation
+    write-host
+    write-host "Exported to $output"
 }

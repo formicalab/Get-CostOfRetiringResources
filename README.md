@@ -19,17 +19,25 @@ This PowerShell script is designed to calculate the cost of retiring resources i
 ![image](https://github.com/formicalab/Get-CostOfRetiringResources/assets/12999635/4f344608-3a13-437c-b4d9-a75c3cade2ce)
 
 
-4. Open the file in Excel and export to CSV. **Note: the script currently uses ';' as field separator**
+4. Open the file in Excel and export to CSV. **Note: the script currently uses ';' as default field separator, but you can change it using the -delimiter parameter**
 5. Execute the script in a PowerShell 7 session, with the Az module installed and logged to Azure.
 
+Usage:
+
 ```
-.\get-costofretiringresources.ps1 -billingPeriod <YYYYMM> -ResourceIdFile <exported file> [-endDate YYYY-MM-DD]
+.\get-costofretiringresources.ps1 -billingPeriod <YYYYMM> -ResourceIdFile <exported file> [-endDate YYYY-MM-DD] [-delimiter <char>] [-output <export.csv>]
 ```
 
 For example:
 
 ```
 .\get-costofretiringresources.ps1 -billingPeriod 202405 -ResourceIdFile .\export_data.csv -endDate 2024-08-31
+```
+
+Exporting to a csv:
+
+```
+.\get-costofretiringresources.ps1 -billingPeriod 202405 -ResourceIdFile .\export_data.csv -endDate 2024-08-31 -delimiter ',' -output .\export_file.csv
 ```
 
 6. The script imports the data, sort them by retirement date and retiring feature, leaving out resources that, in theory, have been _already_ retired..
