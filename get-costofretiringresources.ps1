@@ -36,7 +36,27 @@ The token to use for authentication
 #>
 function Get-ResourceCost($resourceId, $billingPeriodStart, $billingPeriodEnd, $token) {
 
+<#
+.SYNOPSIS
+Get the cost of retiring resources in a billing period
+
+.PARAMETER resourceId
+The resource ID of the resource to get the cost for
+
+.PARAMETER billingPeriodStart
+The start of the billing period in UTC format
+
+.PARAMETER billingPeriodEnd
+The end of the billing period in UTC format
+
+.PARAMETER token
+The token to use for authentication
+#>
+function Get-ResourceCost($resourceId, $billingPeriodStart, $billingPeriodEnd, $token) {
+
     $subscriptionId = $resourceId.Split("/")[2]
+    $resourceGroup = $resourceId.Split("/")[4]
+    
     $resourceGroup = $resourceId.Split("/")[4]
     
 
@@ -71,22 +91,42 @@ function Get-ResourceCost($resourceId, $billingPeriodStart, $billingPeriodEnd, $
         }
     }
 
+
     $jsonPayload = $jsonPayload | ConvertTo-Json -Depth 10
+
 
     $cost = 0
 
     # send the request. Handle errors 429 (too many requests)
+    # send the request. Handle errors 429 (too many requests)
     do {
         $requestCompleted = $false
+        $requestCompleted = $false
         $statusCode = 0
+        $responseHeaders = $null
+        $response = Invoke-RestMethod -Uri $uri -Method Post -SkipHttpErrorCheck -StatusCodeVariable "statusCode" -ResponseHeadersVariable "responseHeaders" -Body $jsonPayload -Headers @{
         $responseHeaders = $null
         $response = Invoke-RestMethod -Uri $uri -Method Post -SkipHttpErrorCheck -StatusCodeVariable "statusCode" -ResponseHeadersVariable "responseHeaders" -Body $jsonPayload -Headers @{
             'Authorization' = "Bearer $token"
             'Content-Type'  = 'application/json'
             "Client-Type"   = "GetCostOfRetiringResources"
+            "Client-Type"   = "GetCostOfRetiringResources"
         }
 
+
         if ($statusCode -eq 429) {
+            $qpuRetryAfter = [double]::Parse($responseHeaders['x-ms-ratelimit-microsoft.costmanagement-client-qpu-retry-after'] ?? 0)
+            $clientRetryAfter = [double]::Parse($responseHeaders['x-ms-ratelimit-microsoft.costmanagement-client-retry-after'] ?? 0)
+            $tenantRetryAfter = [double]::Parse($responseHeaders['x-ms-ratelimit-microsoft.costmanagement-tenant-retry-after'] ?? 0)
+            $entityRetryAfter = [double]::Parse($responseHeaders['x-ms-ratelimit-microsoft.costmanagement-entity-retry-after'] ?? 0)            
+            $retryAfterSet = @($qpuRetryAfter, $clientRetryAfter, $tenantRetryAfter, $entityRetryAfter)
+            $retryAfter = $retryAfterSet | Sort-Object -Descending | Select-Object -First 1 # get the maximum value of the retry-after values
+            if ($retryAfter -eq 0) {
+                $retryAfter = 30    # if none of the above is set, assume a delay of 30 seconds
+            }
+
+            write-host -ForegroundColor DarkYellow "wait ${retryAfter}s... " -NoNewline
+            Start-Sleep -Seconds $retryAfter
             $qpuRetryAfter = [double]::Parse($responseHeaders['x-ms-ratelimit-microsoft.costmanagement-client-qpu-retry-after'] ?? 0)
             $clientRetryAfter = [double]::Parse($responseHeaders['x-ms-ratelimit-microsoft.costmanagement-client-retry-after'] ?? 0)
             $tenantRetryAfter = [double]::Parse($responseHeaders['x-ms-ratelimit-microsoft.costmanagement-tenant-retry-after'] ?? 0)
@@ -103,10 +143,12 @@ function Get-ResourceCost($resourceId, $billingPeriodStart, $billingPeriodEnd, $
         elseif ($statusCode -ne 200) {
             Write-host -ForegroundColor Red "Error: $statusCode"
             $requestCompleted = $true
+            $requestCompleted = $true
         }
         else {
             if (($null -ne $response.properties.rows) -and ($response.properties.rows.Count -gt 0)) {
                 $cost = $response.properties.rows[0][0]
+                write-host -ForegroundColor Yellow ("{0:N5}" -f $cost)
                 write-host -ForegroundColor Yellow ("{0:N5}" -f $cost)
             }
             else {
@@ -270,6 +312,7 @@ foreach ($resourceLine in $resourceIds) {
 
     
     $totalCost += $cost
+    $totalCostByResourceType["${resourceType}, ${retiringFeature}"] += $cost
     $totalCostByResourceType["${resourceType}, ${retiringFeature}"] += $cost
 }
 
